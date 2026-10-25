@@ -4,21 +4,26 @@
 #include "board.h"
 #include <limits>
 #include <algorithm>
+#include <stdexcept>
 
 class MinimaxBot {
 private:
     int maxDepth;
 
-    // Evaluates board score: higher is better for RED, lower for BLACK
-    int evaluateBoard(const Board& board) const {
+    // Score from `aiPlayer`'s point of view: higher is always better for the AI.
+    int evaluateBoard(const Board& board, Player aiPlayer) const {
         int score = 0;
         for (int r = 0; r < BOARD_SIZE; ++r) {
             for (int c = 0; c < BOARD_SIZE; ++c) {
                 Piece p = board.getPiece(r, c);
-                if (p == Piece::RED) score += 10;
-                else if (p == Piece::RED_KING) score += 15;
-                else if (p == Piece::BLACK) score -= 10;
-                else if (p == Piece::BLACK_KING) score -= 15;
+                if (p == Piece::EMPTY) continue;
+
+                bool isKing = (p == Piece::RED_KING || p == Piece::BLACK_KING);
+                bool isRed  = (p == Piece::RED || p == Piece::RED_KING);
+                int value = isKing ? 15 : 10;
+
+                bool belongsToAI = (isRed == (aiPlayer == Player::RED));
+                score += belongsToAI ? value : -value;
             }
         }
         return score;
@@ -29,14 +34,17 @@ public:
 
     int minimax(Board board, int depth, bool isMaximizing, int alpha, int beta, Player aiPlayer) {
         if (depth == 0) {
-            return evaluateBoard(board);
+            return evaluateBoard(board, aiPlayer);
         }
 
-        Player currentTurn = isMaximizing ? aiPlayer : (aiPlayer == Player::RED ? Player::BLACK : Player::RED);
+        Player opponent = (aiPlayer == Player::RED ? Player::BLACK : Player::RED);
+        Player currentTurn = isMaximizing ? aiPlayer : opponent;
         std::vector<Move> moves = board.getValidMoves(currentTurn);
 
+        // No moves = the side to move loses. Adding `depth` prefers faster wins
+        // and slower losses.
         if (moves.empty()) {
-            return isMaximizing ? -1000 : 1000;
+            return isMaximizing ? -1000 - depth : 1000 + depth;
         }
 
         if (isMaximizing) {
@@ -64,17 +72,22 @@ public:
         }
     }
 
+    // Precondition: aiPlayer has at least one legal move.
     Move getBestMove(Board board, Player aiPlayer) {
         std::vector<Move> moves = board.getValidMoves(aiPlayer);
+        if (moves.empty()) {
+            throw std::logic_error("getBestMove called with no legal moves");
+        }
+
         Move bestMove = moves[0];
         int bestValue = std::numeric_limits<int>::min();
 
         for (const auto& move : moves) {
             Board tempBoard = board;
             tempBoard.makeMove(move, aiPlayer);
-            int moveValue = minimax(tempBoard, maxDepth - 1, false, 
-                                    std::numeric_limits<int>::min(), 
-                                    std::numeric_limits<int>::max(), 
+            int moveValue = minimax(tempBoard, maxDepth - 1, false,
+                                    std::numeric_limits<int>::min(),
+                                    std::numeric_limits<int>::max(),
                                     aiPlayer);
 
             if (moveValue > bestValue) {
