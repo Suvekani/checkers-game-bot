@@ -35,6 +35,12 @@ Board::Board() {
     initializeBoard();
 }
 
+void Board::setPiece(int row, int col, Piece piece) {
+    if (isValidPosition(row, col)) {
+        grid[row][col] = piece;
+    }
+}
+
 void Board::initializeBoard() {
     for (int r = 0; r < BOARD_SIZE; ++r) {
         for (int c = 0; c < BOARD_SIZE; ++c) {
@@ -92,6 +98,47 @@ void Board::displayBoard() const {
     std::cout << "\n";
 }
 
+void Board::collectJumps(const Board& state, Position cur, Piece piece, Player player,
+                         const Position& start, const std::vector<Position>& path,
+                         std::vector<Move>& out) const {
+    bool foundJump = false;
+
+    for (int dr : rowDirections(piece)) {
+        for (int dc : {-1, 1}) {
+            int mr = cur.row + dr,     mc = cur.col + dc;      // square being jumped
+            int lr = cur.row + 2 * dr, lc = cur.col + 2 * dc;  // landing square
+
+            if (!state.isValidPosition(lr, lc)) continue;
+            if (!isOpponentOf(state.grid[mr][mc], player)) continue;
+            if (state.grid[lr][lc] != Piece::EMPTY) continue;
+
+            foundJump = true;
+
+            Board next = state;
+            next.grid[mr][mc] = Piece::EMPTY;   // captured pieces can't be jumped twice
+
+            std::vector<Position> nextPath = path;
+            nextPath.push_back({lr, lc});
+
+            if (isPromotionRow(piece, lr)) {
+                // Becoming a king ends the turn.
+                Move m(start, {lr, lc}, true);
+                m.path = nextPath;
+                out.push_back(m);
+            } else {
+                collectJumps(next, {lr, lc}, piece, player, start, nextPath, out);
+            }
+        }
+    }
+
+    // No further jump from here: the chain (if any) ends on this square.
+    if (!foundJump && !path.empty()) {
+        Move m(start, cur, true);
+        m.path = path;
+        out.push_back(m);
+    }
+}
+
 std::vector<Move> Board::getValidMoves(Player player) const {
     std::vector<Move> moves;
     std::vector<Move> jumps;
@@ -112,21 +159,11 @@ std::vector<Move> Board::getValidMoves(Player player) const {
                 }
             }
 
-            // This Move representation stores a single start/end pair, so each
-            // capture is represented as one jump.
-            for (int dr : rowDirections(p)) {
-                for (int dc : {-1, 1}) {
-                    int mr = r + dr;
-                    int mc = c + dc;
-                    int lr = r + 2 * dr;
-                    int lc = c + 2 * dc;
-                    if (isValidPosition(lr, lc) &&
-                        isOpponentOf(grid[mr][mc], player) &&
-                        grid[lr][lc] == Piece::EMPTY) {
-                        jumps.push_back(Move({r, c}, {lr, lc}, true));
-                    }
-                }
-            }
+            // Jumps (including multi-jump chains). Lift the piece off its start
+            // square so a king can legally loop back through it.
+            Board state = *this;
+            state.grid[r][c] = Piece::EMPTY;
+            collectJumps(state, {r, c}, p, player, {r, c}, {}, jumps);
         }
     }
 
@@ -135,36 +172,18 @@ std::vector<Move> Board::getValidMoves(Player player) const {
 }
 
 bool Board::makeMove(const Move& move, Player player) {
-    if (!isValidPosition(move.start.row, move.start.col) ||
-        !isValidPosition(move.end.row, move.end.col)) {
-        return false;
-    }
-
     Piece p = grid[move.start.row][move.start.col];
     if (!belongsTo(p, player)) return false;
-    if (grid[move.end.row][move.end.col] != Piece::EMPTY) return false;
-
-    if (move.isJump) {
-        int rowDiff = move.end.row - move.start.row;
-        int colDiff = move.end.col - move.start.col;
-        if (std::abs(rowDiff) != 2 || std::abs(colDiff) != 2) return false;
-        int capturedRow = (move.start.row + move.end.row) / 2;
-        int capturedCol = (move.start.col + move.end.col) / 2;
-        if (!isOpponentOf(grid[capturedRow][capturedCol], player)) return false;
-    } else if (std::abs(move.end.row - move.start.row) != 1 ||
-               std::abs(move.end.col - move.start.col) != 1 ||
-               (p != Piece::RED_KING && p != Piece::BLACK_KING &&
-                ((p == Piece::RED && move.end.row >= move.start.row) ||
-                 (p == Piece::BLACK && move.end.row <= move.start.row)))) {
-        return false;
-    }
 
     grid[move.start.row][move.start.col] = Piece::EMPTY;
 
-    // Remove the piece jumped over.
+    // Remove every piece jumped over along the path.
     if (move.isJump) {
-        grid[(move.start.row + move.end.row) / 2]
-            [(move.start.col + move.end.col) / 2] = Piece::EMPTY;
+        Position cur = move.start;
+        for (const Position& next : move.path) {
+            grid[(cur.row + next.row) / 2][(cur.col + next.col) / 2] = Piece::EMPTY;
+            cur = next;
+        }
     }
 
     grid[move.end.row][move.end.col] = p;
