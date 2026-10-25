@@ -1,31 +1,30 @@
 #include "board.h"
 #include "stack.h"
 #include "queue.h"
-#include <iostream>
-#include <utility>
 #include "bot.h"
+#include <iostream>
+#include <limits>
 
+// One entry per move, so Undo can roll the board back.
 struct MoveRecord {
     Board previousState;
-    Move move;
-    bool hadCapture = false;
-    decltype(std::declval<Move&>().start) capturedPos{};
-    Piece capturedPiece = Piece::EMPTY;
+    Player mover;
 };
 
-MoveRecord makeMoveRecord(const Board& previousState, const Move& move) {
-    MoveRecord record{previousState, move};
-    record.hadCapture = move.isJump;
-
-    if (move.isJump) {
-        record.capturedPos = {
-            (move.start.row + move.end.row) / 2,
-            (move.start.col + move.end.col) / 2
-        };
-        record.capturedPiece = previousState.getPiece(record.capturedPos.row, record.capturedPos.col);
+// Prints a move as (r,c) -> (r,c) [-> (r,c) ...]. The hop squares go through
+// a Queue so multi-jumps are printed in the order they are played.
+void printMove(const Move& move) {
+    Queue<Position> hops;
+    for (const Position& p : move.path) {
+        hops.enqueue(p);
     }
 
-    return record;
+    std::cout << "(" << move.start.row << "," << move.start.col << ")";
+    while (!hops.isEmpty()) {
+        Position p = hops.front();
+        hops.dequeue();
+        std::cout << " -> (" << p.row << "," << p.col << ")";
+    }
 }
 
 int main() {
@@ -34,24 +33,19 @@ int main() {
 
     // Stack to track move history for Undo feature
     Stack<MoveRecord> history;
-    
-    // Queue to hold suggested move evaluation sequence
-    Queue<Move> moveQueue;
-
-    bool gameRunning = true;
 
     // Initialize AI Bot (search depth 4)
     MinimaxBot bot(4);
 
-    while (gameRunning) {
+    while (true) {
         board.displayBoard();
 
         std::vector<Move> validMoves = board.getValidMoves(currentTurn);
 
         if (validMoves.empty()) {
-            std::cout << "Game Over! " 
-                    << (currentTurn == Player::RED ? "BLACK (AI)" : "RED (Player)") 
-                    << " wins!\n";
+            std::cout << "Game Over! "
+                      << (currentTurn == Player::RED ? "BLACK (AI)" : "RED (Player)")
+                      << " wins!\n";
             break;
         }
 
@@ -60,9 +54,9 @@ int main() {
             std::cout << "\n[Your Turn - RED]\n";
             std::cout << "Available moves:\n";
             for (size_t i = 0; i < validMoves.size(); ++i) {
-                std::cout << "  " << i + 1 << ". From (" << validMoves[i].start.row << "," << validMoves[i].start.col << ")"
-                        << " to (" << validMoves[i].end.row << "," << validMoves[i].end.col << ")"
-                        << (validMoves[i].isJump ? " [CAPTURE]" : "") << "\n";
+                std::cout << "  " << i + 1 << ". From ";
+                printMove(validMoves[i]);
+                std::cout << (validMoves[i].isJump ? " [CAPTURE]" : "") << "\n";
             }
 
             std::cout << "\nOptions:\n";
@@ -72,26 +66,37 @@ int main() {
             std::cout << "Your choice: ";
 
             int choice;
-            std::cin >> choice;
+            if (!(std::cin >> choice)) {
+                if (std::cin.eof()) {
+                    std::cout << "\nInput closed. Exiting game...\n";
+                    break;
+                }
+                // Non-numeric input: clear the error and discard the bad line.
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cout << "\n[!] Please enter a number.\n";
+                continue;
+            }
 
             if (choice == 0) {
-                gameRunning = false;
                 std::cout << "Exiting game...\n";
                 break;
             }
 
-            // Undo logic
+            // Undo: roll back to just before the player's last move
+            // (this also takes back the AI's reply).
             if (choice == 99) {
                 if (history.isEmpty()) {
                     std::cout << "\n[!] No moves to undo!\n";
                 } else {
-                    for (int i = 0; i < 2 && !history.isEmpty(); ++i) {
-                        MoveRecord lastRecord = history.top();
+                    while (!history.isEmpty()) {
+                        MoveRecord last = history.top();
                         history.pop();
-                        board = lastRecord.previousState;
+                        board = last.previousState;
+                        if (last.mover == Player::RED) break;
                     }
                     currentTurn = Player::RED;
-                    std::cout << "\n[✓] Undid last move sequence!\n";
+                    std::cout << "\n[OK] Undid last move sequence!\n";
                 }
                 continue;
             }
@@ -101,29 +106,28 @@ int main() {
                 continue;
             }
 
-            Move selectedMove = validMoves[choice - 1];
+            const Move& selectedMove = validMoves[choice - 1];
 
-            MoveRecord rec = makeMoveRecord(board, selectedMove);
-
-            board.makeMove(selectedMove, currentTurn);
-            history.push(rec);
+            history.push(MoveRecord{board, Player::RED});
+            board.makeMove(selectedMove, Player::RED);
 
             currentTurn = Player::BLACK; // Hand turn to AI
-        } 
+        }
         // --- AI TURN (BLACK) ---
         else {
             std::cout << "\n[AI Turn - BLACK Thinking...]\n";
             Move aiMove = bot.getBestMove(board, Player::BLACK);
 
-            MoveRecord rec = makeMoveRecord(board, aiMove);
-
+            history.push(MoveRecord{board, Player::BLACK});
             board.makeMove(aiMove, Player::BLACK);
-            history.push(rec);
 
-            std::cout << "AI played from (" << aiMove.start.row << "," << aiMove.start.col 
-                    << ") to (" << aiMove.end.row << "," << aiMove.end.col << ")\n\n";
+            std::cout << "AI played ";
+            printMove(aiMove);
+            std::cout << "\n\n";
 
             currentTurn = Player::RED; // Hand turn back to Player
         }
     }
+
+    return 0;
 }
