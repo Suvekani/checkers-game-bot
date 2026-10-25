@@ -1,4 +1,4 @@
-#include "../include/board.h"
+#include "board.h"
 #include <iostream>
 
 Board::Board() {
@@ -61,4 +61,79 @@ void Board::displayBoard() const {
         std::cout << "\n";
     }
     std::cout << "\n";
+}
+std::vector<Move> Board::getValidMoves(Player player) const {
+    std::vector<Move> moves;
+    std::vector<Move> jumps;
+
+    for (int r = 0; r < BOARD_SIZE; ++r) {
+        for (int c = 0; c < BOARD_SIZE; ++c) {
+            Piece p = grid[r][c];
+
+            // Filter pieces belonging to current player
+            if ((player == Player::RED && (p == Piece::RED || p == Piece::RED_KING)) ||
+                (player == Player::BLACK && (p == Piece::BLACK || p == Piece::BLACK_KING))) {
+
+                // Determine direction based on color/king status
+                std::vector<int> rowDirs;
+                if (p == Piece::RED || p == Piece::RED_KING) rowDirs.push_back(-1);   // Moving up
+                if (p == Piece::BLACK || p == Piece::BLACK_KING) rowDirs.push_back(1); // Moving down
+
+                int colDirs[] = {-1, 1};
+
+                for (int dr : rowDirs) {
+                    for (int dc : colDirs) {
+                        int nr = r + dr;
+                        int nc = c + dc;
+
+                        // Check simple single step
+                        if (isValidPosition(nr, nc) && grid[nr][nc] == Piece::EMPTY) {
+                            moves.push_back(Move({r, c}, {nr, nc}, false));
+                        }
+
+                        // Check capture jump over opponent
+                        int jr = r + 2 * dr;
+                        int jc = c + 2 * dc;
+                        if (isValidPosition(jr, jc) && grid[jr][jc] == Piece::EMPTY) {
+                            Piece midPiece = grid[nr][nc];
+                            bool isOpponent = false;
+                            if (player == Player::RED && (midPiece == Piece::BLACK || midPiece == Piece::BLACK_KING)) isOpponent = true;
+                            if (player == Player::BLACK && (midPiece == Piece::RED || midPiece == Piece::RED_KING)) isOpponent = true;
+
+                            if (isOpponent) {
+                                jumps.push_back(Move({r, c}, {jr, jc}, true));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // In checkers rules, jumps are mandatory if available
+    return !jumps.empty() ? jumps : moves;
+}
+
+bool Board::makeMove(const Move& move, Player player) {
+    Piece p = grid[move.start.row][move.start.col];
+
+    // Basic move execution
+    grid[move.start.row][move.start.col] = Piece::EMPTY;
+    grid[move.end.row][move.end.col] = p;
+
+    // Handle jump capture
+    if (move.isJump) {
+        int midRow = (move.start.row + move.end.row) / 2;
+        int midCol = (move.start.col + move.end.col) / 2;
+        grid[midRow][midCol] = Piece::EMPTY;
+    }
+
+    // King promotion
+    if (player == Player::RED && move.end.row == 0) {
+        grid[move.end.row][move.end.col] = Piece::RED_KING;
+    } else if (player == Player::BLACK && move.end.row == BOARD_SIZE - 1) {
+        grid[move.end.row][move.end.col] = Piece::BLACK_KING;
+    }
+
+    return true;
 }
