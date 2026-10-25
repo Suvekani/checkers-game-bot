@@ -35,6 +35,14 @@ Board::Board() {
     initializeBoard();
 }
 
+void Board::clear() {
+    for (int r = 0; r < BOARD_SIZE; ++r) {
+        for (int c = 0; c < BOARD_SIZE; ++c) {
+            grid[r][c] = Piece::EMPTY;
+        }
+    }
+}
+
 void Board::setPiece(int row, int col, Piece piece) {
     if (isValidPosition(row, col)) {
         grid[row][col] = piece;
@@ -42,11 +50,7 @@ void Board::setPiece(int row, int col, Piece piece) {
 }
 
 void Board::initializeBoard() {
-    for (int r = 0; r < BOARD_SIZE; ++r) {
-        for (int c = 0; c < BOARD_SIZE; ++c) {
-            grid[r][c] = Piece::EMPTY;
-        }
-    }
+    clear();
 
     // Place Black pieces (rows 0 to 2)
     for (int r = 0; r < 3; ++r) {
